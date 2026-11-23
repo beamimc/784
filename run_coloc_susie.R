@@ -3,9 +3,12 @@
 # (allows more than one causal variant per trait)
 # Follows the coloc SuSiE vignette:
 #   https://chr1swallace.github.io/coloc/articles/a06_SuSiE.html
-# LD: reference panel in PLINK format (e.g. 1000 Genomes EUR, hg19), via ieugwasr::ld_matrix_local()
+# LD (choose with LD_SOURCE in SETTINGS):
+#   "ukb" = UK Biobank LD (~337k British-ancestry, hg19) via UKB_ld_matrices/01.ld_matrix_generation.R
+#   "1kg" = 1000 Genomes EUR PLINK panel (n = 503, hg19) via ieugwasr::ld_matrix_local() (03.get_LD_ref.sh)
 #
-# Run:   module load plink
+# Run:   for "ukb": module load anaconda; conda activate base; export RETICULATE_PYTHON=$(which python)
+#        for "1kg": module load plink/1.90b6.21
 #        Rscript run_coloc_susie.R                 # uses the genes listed in SETTINGS
 #        Rscript run_coloc_susie.R sort1 hmgcr     # or give genes on the command line
 #
@@ -21,7 +24,6 @@
 
 library(coloc)
 library(susieR)
-library(ieugwasr)
 library(data.table)
 
 # =============================================================================
@@ -29,10 +31,14 @@ library(data.table)
 # =============================================================================
 
 # --- Where things are -------------------------------------------------------
-DIR      <- "/work/users/b/e/beacm/784/784"          # working directory with the input TSVs
+DIR      <- Sys.getenv("COLOC_DIR", "/work/users/b/e/beacm/784/784")  # input TSVs; set COLOC_DIR in your job file to use your own folder
 genes    <- c("sort1", "hmgcr")                      # overridden by command-line arguments, if given
-LD_BFILE <- file.path(DIR, "1kg", "EUR")             # PLINK prefix of the LD reference (.bed/.bim/.fam)
-OUT_DIR  <- file.path(DIR, "coloc_susie_results")    # created if it doesn't exist
+# --- LD reference ------------------------------------------------------------
+LD_SOURCE     <- "ukb"                                      # "ukb" (UK Biobank) or "1kg" (1000 Genomes)
+UKB_LD_SCRIPT <- "UKB_ld_matrices/01.ld_matrix_generation.R" # Marisa's UKB LD function (path from where you run Rscript)
+UKB_LD_DIR    <- file.path(DIR, "ukb_ld")                    # raw UKB .npz/.gz downloads (~GBs per 3 Mb window)
+LD_BFILE      <- file.path(DIR, "1kg", "EUR")                # 1000G PLINK prefix (only used if LD_SOURCE = "1kg")
+OUT_DIR  <- file.path(DIR, paste0("coloc_susie_results_", LD_SOURCE))  # separate folder per LD source
 
 # --- Input file names: {gene} is replaced by each gene name -----------------
 GWAS_FILE <- "gwas_ldl_{gene}_region.tsv"
@@ -67,8 +73,14 @@ MIN_SNPS           <- 50     # skip a gene if fewer SNPs than this survive QC
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) > 0) genes <- tolower(args)
 
-PLINK <- Sys.which("plink")
-if (PLINK == "") PLINK <- genetics.binaRies::get_plink_binary()
+if (LD_SOURCE == "1kg") {
+  library(ieugwasr)
+  PLINK <- Sys.which("plink")
+  if (PLINK == "") PLINK <- genetics.binaRies::get_plink_binary()
+} else if (LD_SOURCE == "ukb") {
+  if (!file.exists(UKB_LD_SCRIPT)) stop("UKB LD script not found: ", UKB_LD_SCRIPT)
+  source(UKB_LD_SCRIPT)                                      # provides get_ukb_ld()
+} else stop("LD_SOURCE must be \"ukb\" or \"1kg\"")
 dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
 out_file <- function(...) file.path(OUT_DIR, paste0(...))
 
@@ -115,11 +127,20 @@ ld_check <- function(D, label) {
 }
 
 # SuSiE with an iteration cap + the vignette's low-coverage retry
+# NOTE: coloc::runsusie(..., repeat_until_convergence = FALSE) calls stop()
+# when SuSiE hasn't converged, so the warning below was never reached and the
+# whole gene was skipped. This does what runsusie() does (susie_rss + coloc's
+# annotate_susie) but keeps a non-converged fit so the warning is printed.
+susie_once <- function(D, coverage) {
+  z <- D$beta / sqrt(D$varbeta)
+  S <- susie_rss(z = z, R = D$LD, n = D$N, max_iter = SUSIE_MAXIT, coverage = coverage)
+  annotate_susie(S, D$snp, D$LD)
+}
 fit_susie <- function(D, label) {
-  S <- runsusie(D, maxit = SUSIE_MAXIT, repeat_until_convergence = FALSE)
+  S <- susie_once(D, coverage = 0.95)
   if (length(S$sets$cs) == 0) {
     message(label, ": no credible sets at coverage 0.95; retrying with coverage 0.1 (interpret with caution)")
-    S <- runsusie(D, coverage = 0.1, maxit = SUSIE_MAXIT, repeat_until_convergence = FALSE)
+    S <- susie_once(D, coverage = 0.1)
   }
   if (!isTRUE(S$converged))
     message(label, ": SuSiE did NOT converge in ", SUSIE_MAXIT,
@@ -172,14 +193,28 @@ run_gene <- function(g) {
   cat("Dropped SNPs with N <", N_FRAC_MIN, "x max N:", n_before - nrow(m), "| remaining:", nrow(m), "\n")
   if (nrow(m) < MIN_SNPS) stop("only ", nrow(m), " SNPs left after QC (MIN_SNPS = ", MIN_SNPS, ")")
   
-  # ---- 2. Signed LD matrix (names are rsID_A1_A2, A1 = counted allele) ----
-  ld <- ld_matrix_local(m$rsid, bfile = LD_BFILE, plink_bin = PLINK, with_alleles = TRUE)
-  
-  ld_info <- do.call(rbind, strsplit(colnames(ld), "_"))
-  ld_info <- data.frame(rsid = ld_info[, 1], ld_a1 = ld_info[, 2], ld_a2 = ld_info[, 3],
-                        stringsAsFactors = FALSE)
+  # ---- 2. Signed LD matrix + its alleles (ld_a1 = allele the betas get aligned to) ----
+  if (LD_SOURCE == "1kg") {
+    # names are rsID_A1_A2, A1 = counted allele
+    ld <- ld_matrix_local(m$rsid, bfile = LD_BFILE, plink_bin = PLINK, with_alleles = TRUE)
+    ld_info <- do.call(rbind, strsplit(colnames(ld), "_"))
+    ld_info <- data.frame(rsid = ld_info[, 1], ld_a1 = ld_info[, 2], ld_a2 = ld_info[, 3],
+                          stringsAsFactors = FALSE)
+  } else {
+    # UK Biobank: matrix for the SNPs in this region (rows/cols in the order of u$snps).
+    # The UKB files code every SNP the same way (allele1/allele2), so aligning all
+    # betas to allele1 gives the correct LD signs (corr(A1_i, A1_j) = corr(A2_i, A2_j)).
+    chr <- sub("_.*", "", m$snp[1])                          # eQTL Variant = chr_pos_NEA_EA
+    u <- get_ukb_ld(chr, min(m$pos), max(m$pos), ld_dir = UKB_LD_DIR, snp_keep = m$rsid)
+    ok <- !(u$snps$rsid %in% u$snps$rsid[duplicated(u$snps$rsid)])   # drop rsIDs listed twice
+    ld <- u$R[ok, ok, drop = FALSE]
+    ld_info <- data.frame(rsid  = u$snps$rsid[ok],
+                          ld_a1 = toupper(u$snps$allele1[ok]),
+                          ld_a2 = toupper(u$snps$allele2[ok]), stringsAsFactors = FALSE)
+    cat("UKB LD file:", u$file, "| SNPs found:", nrow(ld_info), "of", nrow(m), "\n")
+  }
   m <- m[match(ld_info$rsid, m$rsid), ]                     # same order as the LD matrix
-  
+
   # Align both traits' betas to the LD panel's A1 (betas are currently for the eQTL EA)
   a1_is_ea  <- m$eqtl_ea == ld_info$ld_a1 & m$eqtl_nea == ld_info$ld_a2
   a1_is_nea <- m$eqtl_ea == ld_info$ld_a2 & m$eqtl_nea == ld_info$ld_a1
@@ -228,6 +263,9 @@ run_gene <- function(g) {
     }
   }
   
+  # Save the LD matrix used (for plot_locus.R's LD colouring)
+  saveRDS(D1$LD, out_file("ld_", g, ".rds"))
+
   # ---- 4. Fine-map each trait with SuSiE ----
   S1 <- fit_susie(D1, GWAS_LABEL)
   S2 <- fit_susie(D2, EQTL_LABEL)
@@ -259,7 +297,7 @@ run_gene <- function(g) {
   dev.off()
   
   # ---- 7. Save ----
-  out <- data.frame(gene = toupper(g), susie.res$summary,
+  out <- data.frame(gene = toupper(g), ld_source = LD_SOURCE, susie.res$summary,
                     gwas_converged = isTRUE(S1$converged), eqtl_converged = isTRUE(S2$converged),
                     gwas_ld_s = chk1$s, eqtl_ld_s = chk2$s)
   fwrite(out, out_file("coloc_susie_", g, "_summary.tsv"), sep = "\t")

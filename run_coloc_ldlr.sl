@@ -4,23 +4,27 @@
 #SBATCH --error=/hickory/users/a/b/abskin/coloc_ldlr_%j.err
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=16G
+#SBATCH --mem=32G
 #SBATCH --time=4:00:00
 # =============================================================================
-# LDLR: coloc.abf -> coloc + SuSiE -> plots.   Submit with:  sbatch run_ldlr.sl
-# Uses the group's analysis (github.com/beamimc/784). Before the first run:
-#   sbatch get_LD_ref.sh   (downloads the 1000G EUR LD panel; once for all genes)
+# LDLR: coloc.abf -> coloc + SuSiE (UK Biobank LD) -> plots.   Submit:  sbatch run_coloc_ldlr.sl
+# UK Biobank LD comes from UKB_ld_matrices/01.ld_matrix_generation.R (downloads
+# the 3 Mb UKB window the first time, ~GBs, so the first run is slower).
 # =============================================================================
 GENE=ldlr
-cd /hickory/users/a/b/abskin          # folder holding the .R scripts
+cd /hickory/users/a/b/abskin          # folder with the .R scripts and UKB_ld_matrices/
+export COLOC_DIR=/hickory/users/a/b/abskin/subsetted_data   # your data folder (used by run_coloc_susie.R and plot_locus.R)
 module load r
-module load plink/1.90b6.21   # must be PLINK 1.9: the default (plink/2.00) is named plink2 and lacks --r square
-which plink || { echo "plink not found"; exit 1; }
-Rscript -e 'for (p in c("coloc","susieR","ieugwasr","data.table","ggplot2","patchwork")) if (!requireNamespace(p, quietly = TRUE)) stop("R package missing: ", p)' || exit 1
+module load anaconda                   # Python + numpy/scipy for reading the UKB .npz files
+conda activate base
+export RETICULATE_PYTHON=$(which python)
+
+python -c "import numpy, scipy" || { echo "numpy/scipy not available in $(which python)"; exit 1; }
+Rscript -e 'for (p in c("coloc","susieR","data.table","ggplot2","patchwork","reticulate")) if (!requireNamespace(p, quietly = TRUE)) stop("R package missing: ", p)' || exit 1
 
 echo "===== 1. coloc.abf ====="
 Rscript run_coloc_Abbey.R $GENE
-echo "===== 2. coloc + SuSiE ====="
+echo "===== 2. coloc + SuSiE (UK Biobank LD) ====="
 Rscript run_coloc_susie.R $GENE
 echo "===== 3. plots ====="
-Rscript plot_locus.R $GENE
+Rscript plot_locus.R $GENE ukb
