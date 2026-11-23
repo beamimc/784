@@ -25,7 +25,7 @@ Everything is **hg19 / GRCh37**.
  
 # How to run your genes (step by step)
  
-Do one gene per job. In everything below, replace `X/Y/ONYEN` with your own path (e.g. `/work/users/h/p/hpei`) and `<gene>` with your lowercase gene name (e.g. `pcsk9`).
+Do one gene per job. In everything below, replace `X/Y/ONYEN` with your own path and `<gene>` with your lowercase gene name.
  
 ## 0. Before you start: your genes' coordinates
  
