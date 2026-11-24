@@ -1,0 +1,2 @@
+gene	ld_source	nsnps	hit1	hit2	PP.H0.abf	PP.H1.abf	PP.H2.abf	PP.H3.abf	PP.H4.abf	idx1	idx2	gwas_converged	eqtl_converged	gwas_L	eqtl_L	gwas_n_cs	eqtl_n_cs	gwas_coverage	eqtl_coverage	gwas_ld_s	eqtl_ld_s
+SORT1	ukb	3197	1_109817590_T_G	1_109817590_T_G	0	4.82703173090631e-206	0	0.0027054093562461	0.997294590643582	1	1	TRUE	TRUE	10	10	1	1	0.95	0.95	0.00871070583451697	0.013272941116959
