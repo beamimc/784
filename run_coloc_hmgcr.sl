@@ -26,7 +26,7 @@ ls "$COLOC_DIR/gwas_ldl_${GENE}_region.tsv" "$COLOC_DIR/eqtl_liver_${GENE}_only.
 echo "===== 1. coloc.abf ====="
 Rscript run_coloc_Bea.R $GENE
 echo "===== 2. coloc + SuSiE (UK Biobank LD) ====="
-Rscript run_coloc_susie.R $GENE
+Rscript run_coloc_susie2.R $GENE
 echo "===== 3. plots ====="
 Rscript plot_locus.R $GENE ukb
 echo "===== 4. copy key outputs to results/ (the files listed in README step 10) ====="
