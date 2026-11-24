@@ -2,12 +2,16 @@
 # Follows the coloc enumeration vignette (coloc.abf):
 #   https://chr1swallace.github.io/coloc/articles/a03_enumeration.html
 #
-# Run:  Rscript run_coloc.R
+# Run:  Rscript run_coloc_Bea.R sort1        (or: Rscript run_coloc_Bea.R sort1 hmgcr)
+# The summary file is named per gene (coloc_summary_<genes>.tsv) so separate
+# jobs don't overwrite it, and plot_locus.R can find it.
 
 library(coloc)
 
 DIR   <- "/work/users/b/e/beacm/784/784"
 genes <- c("sort1", "hmgcr")
+args  <- commandArgs(trailingOnly = TRUE)
+if (length(args) > 0) genes <- tolower(args)
 
 all_summaries <- list()
 
@@ -114,6 +118,6 @@ for (g in genes) {
 summary_tab <- do.call(rbind, all_summaries)
 cat("\n==================== SUMMARY ====================\n")
 print(summary_tab)
-write.table(summary_tab, file.path(DIR, "coloc_summary.tsv"),
+write.table(summary_tab, file.path(DIR, paste0("coloc_summary_", paste(genes, collapse = "_"), ".tsv")),
             sep = "\t", quote = FALSE, row.names = FALSE)
 
