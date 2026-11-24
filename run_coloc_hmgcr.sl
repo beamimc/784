@@ -29,11 +29,15 @@ echo "===== 2. coloc + SuSiE (UK Biobank LD) ====="
 Rscript run_coloc_susie2.R $GENE
 echo "===== 3. plots ====="
 Rscript plot_locus.R $GENE ukb
-echo "===== 4. copy key outputs to results/ (the files listed in README step 10) ====="
+Rscript plot_coloc_abf.R $GENE           # coloc.abf-only figure (no SuSiE)
+echo "===== 4. copy key outputs to results/ (README step 10 files + coloc figures + sensitivity plots) ====="
 mkdir -p results
 for f in "$COLOC_DIR/coloc_summary_${GENE}.tsv" \
          "$COLOC_DIR/coloc_susie_results_ukb/coloc_susie_${GENE}_summary.tsv" \
          "$COLOC_DIR"/coloc_susie_results_ukb/susie_${GENE}_*_credible_sets.tsv \
-         "$COLOC_DIR"/plots/${GENE}_ukb_*.png; do
+         "$COLOC_DIR"/plots/${GENE}_ukb_*.png \
+         "$COLOC_DIR/plots/${GENE}_coloc_abf.png" \
+         "$COLOC_DIR/coloc_${GENE}_sensitivity.pdf" \
+         "$COLOC_DIR/coloc_susie_results_ukb/coloc_susie_${GENE}_sensitivity.pdf"; do
   if [ -f "$f" ]; then cp "$f" results/; else echo "not found, skipped: $f"; fi
 done
