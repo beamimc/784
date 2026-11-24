@@ -29,3 +29,11 @@ echo "===== 2. coloc + SuSiE (UK Biobank LD) ====="
 Rscript run_coloc_susie.R $GENE
 echo "===== 3. plots ====="
 Rscript plot_locus.R $GENE ukb
+echo "===== 4. copy key outputs to results/ (the files listed in README step 10) ====="
+mkdir -p results
+for f in "$COLOC_DIR/coloc_summary_${GENE}.tsv" \
+         "$COLOC_DIR/coloc_susie_results_ukb/coloc_susie_${GENE}_summary.tsv" \
+         "$COLOC_DIR"/coloc_susie_results_ukb/susie_${GENE}_*_credible_sets.tsv \
+         "$COLOC_DIR"/plots/${GENE}_ukb_*.png; do
+  if [ -f "$f" ]; then cp "$f" results/; else echo "not found, skipped: $f"; fi
+done
